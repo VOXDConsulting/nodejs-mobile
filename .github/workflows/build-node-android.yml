@@ -1,0 +1,93 @@
+name: Build CuidaMSG Node Android runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch to build
+        required: true
+        default: codex/node22-wasm
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_NDK_VERSION: 26.3.11579264
+  ANDROID_TARGET_SDK_VERSION: 28
+
+jobs:
+  build-android:
+    name: Build ${{ matrix.target_arch }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        target_arch:
+          - arm64
+          - x86_64
+
+    steps:
+      - name: Check out patched Node source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Build Android runtime
+        env:
+          LDFLAGS: -Wl,-z,max-page-size=16384
+        run: |
+          ./tools/build_android.sh \
+            "$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
+            "$ANDROID_TARGET_SDK_VERSION" \
+            "${{ matrix.target_arch }}"
+          rm -rf ./out_android/libnode
+
+      - name: Upload architecture output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: node-android-${{ matrix.target_arch }}
+          path: out_android
+          retention-days: 1
+
+  combine-android:
+    name: Combine Android runtime
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    needs: build-android
+
+    steps:
+      - name: Check out patched Node source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Download architecture outputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: node-android-*
+          merge-multiple: true
+          path: out_android
+
+      - name: Assemble distributable runtime
+        run: |
+          rm -rf out_android/libnode
+          ./configure
+          mkdir -p artifacts/bin artifacts/include
+          cp -R out_android/* artifacts/bin
+          ./tools/copy_libnode_headers.sh android
+          cp -R out_android/libnode/include/* artifacts/include
+
+      - name: Upload combined runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nodejs-mobile-android-wasm
+          path: artifacts
+          retention-days: 1
