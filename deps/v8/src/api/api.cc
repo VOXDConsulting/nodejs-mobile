@@ -9548,7 +9548,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
   V(Split, split)                             \
   V(ToPrimitive, to_primitive)                \
   V(ToStringTag, to_string_tag)               \
-  V(Unscopables, unscopables)
+  V(Unscopables, unscopables)                 \
+  V(Dispose, dispose)                         \
+  V(AsyncDispose, async_dispose)
 
 #define SYMBOL_GETTER(Name, name)                                      \
   Local<Symbol> v8::Symbol::Get##Name(Isolate* v8_isolate) {           \
@@ -10978,7 +10980,7 @@ std::string Isolate::GetDefaultLocale() {
 
 uint64_t Isolate::GetHashSeed() {
   i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(this);
-  return HashSeed(i_isolate);
+  return i::HashSeed(i_isolate).seed();
 }
 
 #if defined(V8_ENABLE_ETW_STACK_WALKING)

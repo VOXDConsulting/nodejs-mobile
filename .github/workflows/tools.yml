@@ -19,13 +19,13 @@ on:
           - amaro
           - brotli
           - c-ares
-          - cjs-module-lexer
+          - merve
           - corepack
-          - doc
           - googletest
           - gyp-next
           - histogram
           - icu
+          - inspector_protocol
           - libuv
           - llhttp
           - minimatch
@@ -37,13 +37,14 @@ on:
           - root-certificates
           - simdjson
           - sqlite
+          - test426-fixtures
           - undici
           - uvwasi
           - zlib
           - zstd
 
 env:
-  PYTHON_VERSION: '3.12'
+  PYTHON_VERSION: '3.14'
 
 permissions:
   contents: read
@@ -51,6 +52,7 @@ permissions:
 jobs:
   tools-deps-update:
     if: github.repository == 'nodejs/node' || github.event_name == 'workflow_dispatch'
+    # cannot use ubuntu-slim here because some update scripts require Docker
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false  # Prevent other jobs from aborting if one fails
@@ -104,11 +106,11 @@ jobs:
               cat temp-output
               tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
               rm temp-output
-          - id: cjs-module-lexer
+          - id: merve
             subsystem: deps
             label: dependencies
             run: |
-              ./tools/dep_updaters/update-cjs-module-lexer.sh > temp-output
+              ./tools/dep_updaters/update-merve.sh > temp-output
               cat temp-output
               tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
               rm temp-output
@@ -118,22 +120,6 @@ jobs:
             run: |
               make corepack-update
               echo "NEW_VERSION=$(node deps/corepack/dist/corepack.js --version)" >> $GITHUB_ENV
-          - id: doc
-            subsystem: tools
-            label: tools
-            run: |
-              cd tools/doc
-              npm ci
-              NEW_VERSION=$(npm outdated --parseable | cut -d: -f4 | xargs)
-              if [ "$NEW_VERSION" != "" ]; then
-                echo "NEW_VERSION=new version" >> $GITHUB_ENV
-                rm -rf package-lock.json node_modules
-                # Include $NEW_VERSION to explicitly update the package.json
-                # entry for the dependency and also so that semver-major updates
-                # are not skipped.
-                npm install --ignore-scripts $NEW_VERSION
-                npm install --ignore-scripts
-              fi
           - id: googletest
             subsystem: deps
             label: dependencies, test
@@ -163,6 +149,14 @@ jobs:
             label: dependencies, test, icu
             run: |
               ./tools/dep_updaters/update-icu.sh > temp-output
+              cat temp-output
+              tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
+              rm temp-output
+          - id: inspector_protocol
+            subsystem: deps
+            label: dependencies, inspector
+            run: |
+              ./tools/dep_updaters/update-inspector-protocol.sh > temp-output
               cat temp-output
               tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
               rm temp-output
@@ -251,6 +245,14 @@ jobs:
               cat temp-output
               tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
               rm temp-output
+          - id: test426-fixtures
+            subsystem: test
+            label: test
+            run: |
+              bash tools/dep_updaters/update-test426-fixtures.sh > temp-output
+              cat temp-output
+              tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
+              rm temp-output
           - id: undici
             subsystem: deps
             label: dependencies
@@ -284,17 +286,15 @@ jobs:
               tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
               rm temp-output
     steps:
-      - name: Setup Git config
-        run: |
-           git config --global user.name "Node.js GitHub Bot"
-           git config --global user.email "github-bot@iojs.org"
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         if: github.event_name == 'schedule' || inputs.id == 'all' || inputs.id == matrix.id
         with:
           persist-credentials: false
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        if: matrix.id == 'icu' && (github.event_name == 'schedule' || inputs.id == 'all' || inputs.id == matrix.id)
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        if: |
+          (matrix.id == 'icu' || matrix.id == 'inspector_protocol') &&
+          (github.event_name == 'schedule' || inputs.id == 'all' || inputs.id == matrix.id)
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: ${{ matrix.run }}
@@ -305,15 +305,17 @@ jobs:
         if: env.COMMIT_MSG == '' && (github.event_name == 'schedule' || inputs.id == 'all' || inputs.id == matrix.id)
         run: |
           echo "COMMIT_MSG=${{ matrix.subsystem }}: update ${{ matrix.id }} to ${{ env.NEW_VERSION }}" >> "$GITHUB_ENV"
-      - uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e  # v7.0.8
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
         if: github.event_name == 'schedule' || inputs.id == 'all' || inputs.id == matrix.id
         # Creates a PR or update the Action's existing PR, or
         # no-op if the base branch is already up-to-date.
         with:
           token: ${{ secrets.GH_USER_TOKEN }}
-          branch: actions/tools-update-${{ matrix.id }}  # Custom branch *just* for this Action.
+          branch: actions/${{ github.ref_name == 'main' || format('{0}/', github.ref_name) }}tools-update-${{ matrix.id }}  # Custom branch *just* for this Action.
           delete-branch: true
           commit-message: ${{ env.COMMIT_MSG }}
           labels: ${{ matrix.label }}
           title: '${{ matrix.subsystem }}: update ${{ matrix.id }} to ${{ env.NEW_VERSION }}'
           body: This is an automated update of ${{ matrix.id }} to ${{ env.NEW_VERSION }}.
+          committer: ${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>
+          author: Node.js GitHub Bot <github-bot@iojs.org>

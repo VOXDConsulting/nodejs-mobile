@@ -88,21 +88,28 @@ const testVectors = [
     publicUsages: ['verify']
   },
   {
-    name: 'Ed448',
-    privateUsages: ['sign'],
-    publicUsages: ['verify']
-  },
-  {
     name: 'X25519',
     privateUsages: ['deriveKey', 'deriveBits'],
     publicUsages: []
   },
-  {
-    name: 'X448',
-    privateUsages: ['deriveKey', 'deriveBits'],
-    publicUsages: []
-  },
 ];
+
+if (!process.features.openssl_is_boringssl) {
+  testVectors.push(
+    {
+      name: 'Ed448',
+      privateUsages: ['sign'],
+      publicUsages: ['verify']
+    },
+    {
+      name: 'X448',
+      privateUsages: ['deriveKey', 'deriveBits'],
+      publicUsages: []
+    },
+  );
+} else {
+  common.printSkipMessage('Skipping unsupported Curve448 test cases');
+}
 
 async function testImportSpki({ name, publicUsages }, extractable) {
   const key = await subtle.importKey(
@@ -344,7 +351,7 @@ async function testImportJwk({ name, publicUsages, privateUsages }, extractable)
         { name },
         extractable,
         publicUsages),
-      { message: 'JWK "crv" Parameter and algorithm name mismatch' });
+      { message: crv ? 'JWK "crv" Parameter and algorithm name mismatch' : 'Invalid keyData' });
 
     await assert.rejects(
       subtle.importKey(
@@ -353,7 +360,7 @@ async function testImportJwk({ name, publicUsages, privateUsages }, extractable)
         { name },
         extractable,
         privateUsages),
-      { message: 'JWK "crv" Parameter and algorithm name mismatch' });
+      { message: crv ? 'JWK "crv" Parameter and algorithm name mismatch' : 'Invalid keyData' });
   }
 
   await assert.rejects(
@@ -412,7 +419,7 @@ async function testImportRaw({ name, publicUsages }) {
 
   for (const [name, publicUsages, privateUsages] of [
     ['Ed25519', ['verify'], ['sign']],
-    ['X448', [], ['deriveBits']],
+    ['X25519', [], ['deriveBits']],
   ]) {
     assert.rejects(subtle.importKey(
       'spki',

@@ -397,7 +397,7 @@ changes:
   from the file. If `null` or `-1`, data will be read from the current file
   position, and the position will be updated. If `position` is a non-negative
   integer, the current file position will remain unchanged.
-  **Default:**: `null`
+  **Default:** `null`
 * Returns: {Promise} Fulfills upon success with an object with two properties:
   * `bytesRead` {integer} The number of bytes read
   * `buffer` {Buffer|TypedArray|DataView} A reference to the passed in `buffer`
@@ -630,15 +630,17 @@ Read from a file and write to an array of {ArrayBufferView}s
 <!-- YAML
 added: v10.0.0
 changes:
+  - version: v24.16.0
+    pr-url: https://github.com/nodejs/node/pull/57775
+    description: Now accepts an additional `signal` property to allow aborting the operation.
   - version: v10.5.0
     pr-url: https://github.com/nodejs/node/pull/20220
-    description: Accepts an additional `options` object to specify whether
-                 the numeric values returned should be bigint.
+    description: Accepts an additional `options` object to specify whether the numeric values returned should be bigint.
 -->
 
 * `options` {Object}
-  * `bigint` {boolean} Whether the numeric values in the returned
-    {fs.Stats} object should be `bigint`. **Default:** `false`.
+  * `bigint` {boolean} Whether the numeric values in the returned {fs.Stats} object should be `bigint`. **Default:** `false`.
+  * `signal` {AbortSignal} An AbortSignal to cancel the operation. **Default:** `undefined`.
 * Returns: {Promise} Fulfills with an {fs.Stats} for the file.
 
 #### `filehandle.sync()`
@@ -1086,6 +1088,9 @@ behavior is similar to `cp dir1/ dir2/`.
 <!-- YAML
 added: v22.0.0
 changes:
+  - version: v24.16.0
+    pr-url: https://github.com/nodejs/node/pull/62695
+    description: Add support for the `followSymlinks` option.
   - version: v24.1.0
     pr-url: https://github.com/nodejs/node/pull/58182
     description: Add support for `URL` instances for `cwd` option.
@@ -1108,10 +1113,18 @@ changes:
   * `exclude` {Function|string\[]} Function to filter out files/directories or a
     list of glob patterns to be excluded. If a function is provided, return
     `true` to exclude the item, `false` to include it. **Default:** `undefined`.
+    If a string array is provided, each string should be a glob pattern that
+    specifies paths to exclude. Note: Negation patterns (e.g., '!foo.js') are
+    not supported.
+  * `followSymlinks` {boolean} When `true`, symbolic links to directories are
+    followed while expanding `**` patterns. **Default:** `false`.
   * `withFileTypes` {boolean} `true` if the glob should return paths as Dirents,
     `false` otherwise. **Default:** `false`.
 * Returns: {AsyncIterator} An AsyncIterator that yields the paths of files
   that match the pattern.
+
+When `followSymlinks` is enabled, detected symbolic link cycles are not
+traversed recursively.
 
 ```mjs
 import { glob } from 'node:fs/promises';
@@ -1224,7 +1237,8 @@ added: v10.0.0
 * `path` {string|Buffer|URL}
 * `options` {Object|integer}
   * `recursive` {boolean} **Default:** `false`
-  * `mode` {string|integer} Not supported on Windows. **Default:** `0o777`.
+  * `mode` {string|integer} Not supported on Windows. See [File modes][]
+    for more details. **Default:** `0o777`.
 * Returns: {Promise} Upon success, fulfills with `undefined` if `recursive`
   is `false`, or the first directory path created if `recursive` is `true`.
 
@@ -1359,7 +1373,8 @@ changes:
 * `flags` {string|number} See [support of file system `flags`][].
   **Default:** `'r'`.
 * `mode` {string|integer} Sets the file mode (permission and sticky bits)
-  if the file is created. **Default:** `0o666` (readable and writable)
+  if the file is created. See [File modes][] for more details.
+  **Default:** `0o666` (readable and writable)
 * Returns: {Promise} Fulfills with a {FileHandle} object.
 
 Opens a {FileHandle}.
@@ -1715,6 +1730,9 @@ changes:
 * `options` {Object}
   * `bigint` {boolean} Whether the numeric values in the returned
     {fs.Stats} object should be `bigint`. **Default:** `false`.
+  * `throwIfNoEntry` {boolean} Whether an exception will be thrown
+    if no file system entry exists, rather than returning `undefined`.
+    **Default:** `true`.
 * Returns: {Promise}  Fulfills with the {fs.Stats} object for the
   given `path`.
 
@@ -1833,6 +1851,10 @@ added:
   * `overflow` {string} Either `'ignore'` or `'throw'` when there are more events to be
     queued than `maxQueue` allows. `'ignore'` means overflow events are dropped and a
     warning is emitted, while `'throw'` means to throw an exception. **Default:** `'ignore'`.
+  * `ignore` {string|RegExp|Function|Array} Pattern(s) to ignore. Strings are
+    glob patterns (using [`minimatch`][]), RegExp patterns are tested against
+    the filename, and functions receive the filename and return `true` to
+    ignore. **Default:** `undefined`.
 * Returns: {AsyncIterator} of objects with the properties:
   * `eventType` {string} The type of change
   * `filename` {string|Buffer|null} The name of the file changed.
@@ -3180,6 +3202,9 @@ descriptor. See [`fs.utimes()`][].
 <!-- YAML
 added: v22.0.0
 changes:
+  - version: v24.16.0
+    pr-url: https://github.com/nodejs/node/pull/62695
+    description: Add support for the `followSymlinks` option.
   - version: v24.1.0
     pr-url: https://github.com/nodejs/node/pull/58182
     description: Add support for `URL` instances for `cwd` option.
@@ -3203,6 +3228,8 @@ changes:
   * `exclude` {Function|string\[]} Function to filter out files/directories or a
     list of glob patterns to be excluded. If a function is provided, return
     `true` to exclude the item, `false` to include it. **Default:** `undefined`.
+  * `followSymlinks` {boolean} When `true`, symbolic links to directories are
+    followed while expanding `**` patterns. **Default:** `false`.
   * `withFileTypes` {boolean} `true` if the glob should return paths as Dirents,
     `false` otherwise. **Default:** `false`.
 
@@ -3210,6 +3237,9 @@ changes:
   * `err` {Error}
 
 * Retrieves the files matching the specified pattern.
+
+When `followSymlinks` is enabled, detected symbolic link cycles are not
+traversed recursively.
 
 ```mjs
 import { glob } from 'node:fs';
@@ -3444,7 +3474,8 @@ changes:
 * `path` {string|Buffer|URL}
 * `options` {Object|integer}
   * `recursive` {boolean} **Default:** `false`
-  * `mode` {string|integer} Not supported on Windows. **Default:** `0o777`.
+  * `mode` {string|integer} Not supported on Windows. See [File modes][]
+    for more details. **Default:** `0o777`.
 * `callback` {Function}
   * `err` {Error}
   * `path` {string|undefined} Present only if a directory is created with
@@ -4422,6 +4453,9 @@ changes:
 * `options` {Object}
   * `bigint` {boolean} Whether the numeric values in the returned
     {fs.Stats} object should be `bigint`. **Default:** `false`.
+  * `throwIfNoEntry` {boolean} Whether an exception will be thrown
+    if no file system entry exists, rather than returning `undefined`.
+    **Default:** `true`.
 * `callback` {Function}
   * `err` {Error}
   * `stats` {fs.Stats}
@@ -4766,6 +4800,9 @@ The `atime` and `mtime` arguments follow these rules:
 <!-- YAML
 added: v0.5.10
 changes:
+  - version: v24.16.0
+    pr-url: https://github.com/nodejs/node/pull/61870
+    description: Added `throwIfNoEntry` option.
   - version: v19.1.0
     pr-url: https://github.com/nodejs/node/pull/45098
     description: Added recursive support for Linux, AIX and IBMi.
@@ -4794,6 +4831,12 @@ changes:
   * `encoding` {string} Specifies the character encoding to be used for the
     filename passed to the listener. **Default:** `'utf8'`.
   * `signal` {AbortSignal} allows closing the watcher with an AbortSignal.
+  * `throwIfNoEntry` {boolean} Indicates whether an exception should be thrown when the
+    path does not exist. **Default:** `true`.
+  * `ignore` {string|RegExp|Function|Array} Pattern(s) to ignore. Strings are
+    glob patterns (using [`minimatch`][]), RegExp patterns are tested against
+    the filename, and functions receive the filename and return `true` to
+    ignore. **Default:** `undefined`.
 * `listener` {Function|undefined} **Default:** `undefined`
   * `eventType` {string}
   * `filename` {string|Buffer|null}
@@ -5736,6 +5779,9 @@ Synchronous version of [`fs.futimes()`][]. Returns `undefined`.
 <!-- YAML
 added: v22.0.0
 changes:
+  - version: v24.16.0
+    pr-url: https://github.com/nodejs/node/pull/62695
+    description: Add support for the `followSymlinks` option.
   - version: v24.1.0
     pr-url: https://github.com/nodejs/node/pull/58182
     description: Add support for `URL` instances for `cwd` option.
@@ -5758,9 +5804,14 @@ changes:
   * `exclude` {Function|string\[]} Function to filter out files/directories or a
     list of glob patterns to be excluded. If a function is provided, return
     `true` to exclude the item, `false` to include it. **Default:** `undefined`.
+  * `followSymlinks` {boolean} When `true`, symbolic links to directories are
+    followed while expanding `**` patterns. **Default:** `false`.
   * `withFileTypes` {boolean} `true` if the glob should return paths as Dirents,
     `false` otherwise. **Default:** `false`.
 * Returns: {string\[]} paths of files that match the pattern.
+
+When `followSymlinks` is enabled, detected symbolic link cycles are not
+traversed recursively.
 
 ```mjs
 import { globSync } from 'node:fs';
@@ -7118,8 +7169,8 @@ added: v0.1.93
 
 * Extends: {stream.Readable}
 
-Instances of {fs.ReadStream} are created and returned using the
-[`fs.createReadStream()`][] function.
+Instances of {fs.ReadStream} cannot be constructed directly. They are created and
+returned using the [`fs.createReadStream()`][] function.
 
 #### Event: `'close'`
 
@@ -7595,6 +7646,7 @@ numeric values will be `bigint` instead of `number`.
 StatFs {
   type: 1397114950,
   bsize: 4096,
+  frsize: 4096,
   blocks: 121938943,
   bfree: 61058895,
   bavail: 61058895,
@@ -7609,6 +7661,7 @@ StatFs {
 StatFs {
   type: 1397114950n,
   bsize: 4096n,
+  frsize: 4096n,
   blocks: 121938943n,
   bfree: 61058895n,
   bavail: 61058895n,
@@ -7665,6 +7718,16 @@ added:
 
 Optimal transfer block size.
 
+#### `statfs.frsize`
+
+<!-- YAML
+added: v24.16.0
+-->
+
+* Type: {number|bigint}
+
+Fundamental file system block size.
+
 #### `statfs.ffree`
 
 <!-- YAML
@@ -7701,6 +7764,186 @@ added:
 
 Type of file system.
 
+### Class: `fs.Utf8Stream`
+
+<!-- YAML
+added: v24.6.0
+-->
+
+> Stability: 1 - Experimental
+
+An optimized UTF-8 stream writer that allows for flushing all the internal
+buffering on demand. It handles `EAGAIN` errors correctly, allowing for
+customization, for example, by dropping content if the disk is busy.
+
+#### Event: `'close'`
+
+The `'close'` event is emitted when the stream is fully closed.
+
+#### Event: `'drain'`
+
+The `'drain'` event is emitted when the internal buffer has drained sufficiently
+to allow continued writing.
+
+#### Event: `'drop'`
+
+The `'drop'` event is emitted when the maximal length is reached and that data
+will not be written. The data that was dropped is passed as the first argument
+to the event handler.
+
+#### Event: `'error'`
+
+The `'error'` event is emitted when an error occurs.
+
+#### Event: `'finish'`
+
+The `'finish'` event is emitted when the stream has been ended and all data has
+been flushed to the underlying file.
+
+#### Event: `'ready'`
+
+The `'ready'` event is emitted when the stream is ready to accept writes.
+
+#### Event: `'write'`
+
+The `'write'` event is emitted when a write operation has completed. The number
+of bytes written is passed as the first argument to the event handler.
+
+#### `new fs.Utf8Stream([options])`
+
+* `options` {Object}
+  * `append`: {boolean} Appends writes to dest file instead of truncating it.
+    **Default**: `true`.
+  * `contentMode`: {string} Which type of data you can send to the write
+    function, supported values are `'utf8'` or `'buffer'`. **Default**:
+    `'utf8'`.
+  * `dest`: {string} A path to a file to be written to (mode controlled by the
+    append option).
+  * `fd`: {number} A file descriptor, something that is returned by `fs.open()`
+    or `fs.openSync()`.
+  * `fs`: {Object} An object that has the same API as the `fs` module, useful
+    for mocking, testing, or customizing the behavior of the stream.
+  * `fsync`: {boolean} Perform a `fs.fsyncSync()` every time a write is
+    completed.
+  * `maxLength`: {number} The maximum length of the internal buffer. If a write
+    operation would cause the buffer to exceed `maxLength`, the data written is
+    dropped and a drop event is emitted with the dropped data
+  * `maxWrite`: {number} The maximum number of bytes that can be written;
+    **Default**: `16384`
+  * `minLength`: {number} The minimum length of the internal buffer that is
+    required to be full before flushing.
+  * `mkdir`: {boolean} Ensure directory for `dest` file exists when true.
+    **Default**: `false`.
+  * `mode`: {number|string} Specify the creating file mode (see `fs.open()`).
+  * `periodicFlush`: {number} Calls flush every `periodicFlush` milliseconds.
+  * `retryEAGAIN` {Function} A function that will be called when `write()`,
+    `writeSync()`, or `flushSync()` encounters an `EAGAIN` or `EBUSY` error.
+    If the return value is `true` the operation will be retried, otherwise it
+    will bubble the error. The `err` is the error that caused this function to
+    be called, `writeBufferLen` is the length of the buffer that was written,
+    and `remainingBufferLen` is the length of the remaining buffer that the
+    stream did not try to write.
+    * `err` {any} An error or `null`.
+    * `writeBufferLen` {number}
+    * `remainingBufferLen`: {number}
+  * `sync`: {boolean} Perform writes synchronously.
+
+#### `utf8Stream.append`
+
+* {boolean} Whether the stream is appending to the file or truncating it.
+
+#### `utf8Stream.contentMode`
+
+* {string} The type of data that can be written to the stream. Supported
+  values are `'utf8'` or `'buffer'`. **Default**: `'utf8'`.
+
+#### `utf8Stream.destroy()`
+
+Close the stream immediately, without flushing the internal buffer.
+
+#### `utf8Stream.end()`
+
+Close the stream gracefully, flushing the internal buffer before closing.
+
+#### `utf8Stream.fd`
+
+* {number} The file descriptor that is being written to.
+
+#### `utf8Stream.file`
+
+* {string} The file that is being written to.
+
+#### `utf8Stream.flush(callback)`
+
+* `callback` {Function}
+  * `err` {Error|null} An error if the flush failed, otherwise `null`.
+
+Writes the current buffer to the file if a write was not in progress. Do
+nothing if `minLength` is zero or if it is already writing.
+
+#### `utf8Stream.flushSync()`
+
+Flushes the buffered data synchronously. This is a costly operation.
+
+#### `utf8Stream.fsync`
+
+* {boolean} Whether the stream is performing a `fs.fsyncSync()` after every
+  write operation.
+
+#### `utf8Stream.maxLength`
+
+* {number} The maximum length of the internal buffer. If a write
+  operation would cause the buffer to exceed `maxLength`, the data written is
+  dropped and a drop event is emitted with the dropped data.
+
+#### `utf8Stream.minLength`
+
+* {number} The minimum length of the internal buffer that is required to be
+  full before flushing.
+
+#### `utf8Stream.mkdir`
+
+* {boolean} Whether the stream should ensure that the directory for the
+  `dest` file exists. If `true`, it will create the directory if it does not
+  exist. **Default**: `false`.
+
+#### `utf8Stream.mode`
+
+* {number|string} The mode of the file that is being written to.
+
+#### `utf8Stream.periodicFlush`
+
+* {number} The number of milliseconds between flushes. If set to `0`, no
+  periodic flushes will be performed.
+
+#### `utf8Stream.reopen(file)`
+
+* `file`: {string|Buffer|URL} A path to a file to be written to (mode
+  controlled by the append option).
+
+Reopen the file in place, useful for log rotation.
+
+#### `utf8Stream.sync`
+
+* {boolean} Whether the stream is writing synchronously or asynchronously.
+
+#### `utf8Stream.write(data)`
+
+* `data` {string|Buffer} The data to write.
+* Returns {boolean}
+
+When the `options.contentMode` is set to `'utf8'` when the stream is created,
+the `data` argument must be a string. If the `contentMode` is set to `'buffer'`,
+the `data` argument must be a {Buffer}.
+
+#### `utf8Stream.writing`
+
+* {boolean} Whether the stream is currently writing data to the file.
+
+#### `utf8Stream[Symbol.dispose]()`
+
+Calls `utf8Stream.destroy()`.
+
 ### Class: `fs.WriteStream`
 
 <!-- YAML
@@ -7709,8 +7952,8 @@ added: v0.1.93
 
 * Extends {stream.Writable}
 
-Instances of {fs.WriteStream} are created and returned using the
-[`fs.createWriteStream()`][] function.
+Instances of {fs.WriteStream} cannot be constructed directly. They are created and
+returned using the [`fs.createWriteStream()`][] function.
 
 #### Event: `'close'`
 
@@ -8505,8 +8748,9 @@ the file contents.
 [Common System Errors]: errors.md#common-system-errors
 [FS constants]: #fs-constants
 [File access constants]: #file-access-constants
+[File modes]: #file-modes
 [MDN-Date]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date
-[MDN-Number]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Number_type
+[MDN-Number]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures#number_type
 [MSDN-Rel-Path]: https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file#fully-qualified-vs-relative-paths
 [MSDN-Using-Streams]: https://docs.microsoft.com/en-us/windows/desktop/FileIO/using-streams
 [Naming Files, Paths, and Namespaces]: https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file
@@ -8568,6 +8812,7 @@ the file contents.
 [`fsPromises.utimes()`]: #fspromisesutimespath-atime-mtime
 [`inotify(7)`]: https://man7.org/linux/man-pages/man7/inotify.7.html
 [`kqueue(2)`]: https://www.freebsd.org/cgi/man.cgi?query=kqueue&sektion=2
+[`minimatch`]: https://github.com/isaacs/minimatch
 [`util.promisify()`]: util.md#utilpromisifyoriginal
 [bigints]: https://tc39.github.io/proposal-bigint
 [caveats]: #caveats

@@ -39,15 +39,13 @@ property, which is an array of `[key, value, key2, value2, ...]`. For
 example, the previous message header object might have a `rawHeaders`
 list like the following:
 
-<!-- eslint-disable @stylistic/js/semi -->
-
-```js
-[ 'ConTent-Length', '123456',
-  'content-LENGTH', '123',
-  'content-type', 'text/plain',
-  'CONNECTION', 'keep-alive',
-  'Host', 'example.com',
-  'accepT', '*/*' ]
+```json
+[ "ConTent-Length", "123456",
+  "content-LENGTH", "123",
+  "content-type", "text/plain",
+  "CONNECTION", "keep-alive",
+  "Host", "example.com",
+  "accepT", "*/*" ]
 ```
 
 ## Class: `http.Agent`
@@ -117,6 +115,10 @@ http.get({
 added: v0.3.4
 changes:
   - version:
+    - v24.7.0
+    pr-url: https://github.com/nodejs/node/pull/59315
+    description: Add support for `agentKeepAliveTimeoutBuffer`.
+  - version:
     - v24.5.0
     pr-url: https://github.com/nodejs/node/pull/58980
     description: Add support for `proxyEnv`.
@@ -156,6 +158,12 @@ changes:
     the [initial delay][]
     for TCP Keep-Alive packets. Ignored when the
     `keepAlive` option is `false` or `undefined`. **Default:** `1000`.
+  * `agentKeepAliveTimeoutBuffer` {number} Milliseconds to subtract from
+    the server-provided `keep-alive: timeout=...` hint when determining socket
+    expiration time. This buffer helps ensure the agent closes the socket
+    slightly before the server does, reducing the chance of sending a request
+    on a socket that’s about to be closed by the server.
+    **Default:** `1000`.
   * `maxSockets` {number} Maximum number of sockets to allow per host.
     If the same host opens multiple concurrent connections, each request
     will use new socket until the `maxSockets` value is reached.
@@ -226,23 +234,37 @@ added: v0.11.4
 -->
 
 * `options` {Object} Options containing connection details. Check
-  [`net.createConnection()`][] for the format of the options
-* `callback` {Function} Callback function that receives the created socket
-* Returns: {stream.Duplex}
+  [`net.createConnection()`][] for the format of the options. For custom agents,
+  this object is passed to the custom `createConnection` function.
+* `callback` {Function} (Optional, primarily for custom agents) A function to be
+  called by a custom `createConnection` implementation when the socket is
+  created, especially for asynchronous operations.
+  * `err` {Error | null} An error object if socket creation failed.
+  * `socket` {stream.Duplex} The created socket.
+* Returns: {stream.Duplex} The created socket. This is returned by the default
+  implementation or by a custom synchronous `createConnection` implementation.
+  If a custom `createConnection` uses the `callback` for asynchronous
+  operation, this return value might not be the primary way to obtain the socket.
 
 Produces a socket/stream to be used for HTTP requests.
 
-By default, this function is the same as [`net.createConnection()`][]. However,
-custom agents may override this method in case greater flexibility is desired.
+By default, this function behaves identically to [`net.createConnection()`][],
+synchronously returning the created socket. The optional `callback` parameter in the
+signature is **not** used by this default implementation.
 
-A socket/stream can be supplied in one of two ways: by returning the
-socket/stream from this function, or by passing the socket/stream to `callback`.
+However, custom agents may override this method to provide greater flexibility,
+for example, to create sockets asynchronously. When overriding `createConnection`:
 
-This method is guaranteed to return an instance of the {net.Socket} class,
-a subclass of {stream.Duplex}, unless the user specifies a socket
-type other than {net.Socket}.
+1. **Synchronous socket creation**: The overriding method can return the
+   socket/stream directly.
+2. **Asynchronous socket creation**: The overriding method can accept the `callback`
+   and pass the created socket/stream to it (e.g., `callback(null, newSocket)`).
+   If an error occurs during socket creation, it should be passed as the first
+   argument to the `callback` (e.g., `callback(err)`).
 
-`callback` has a signature of `(err, stream)`.
+The agent will call the provided `createConnection` function with `options` and
+this internal `callback`. The `callback` provided by the agent has a signature
+of `(err, stream)`.
 
 ### `agent.keepSocketAlive(socket)`
 
@@ -626,7 +648,7 @@ added: v0.3.6
 -->
 
 Emitted when the request has been sent. More specifically, this event is emitted
-when the last segment of the response headers and body have been handed off to
+when the last segment of the request headers and body have been handed off to
 the operating system for transmission over the network. It does not imply that
 the server has received anything yet.
 
@@ -930,7 +952,8 @@ changes:
 
 Destroy the request. Optionally emit an `'error'` event,
 and emit a `'close'` event. Calling this will cause remaining data
-in the response to be dropped and the socket to be destroyed.
+in the response to be dropped, and the socket to be destroyed if used,
+or returned to the corresponding Agent pool otherwise if possible.
 
 See [`writable.destroy()`][] for further details.
 
@@ -1161,6 +1184,7 @@ may run into a 'ECONNRESET' error.
 
 ```mjs
 import http from 'node:http';
+const agent = new http.Agent({ keepAlive: true });
 
 // Server has a 5 seconds keep-alive timeout by default
 http
@@ -1182,6 +1206,7 @@ setInterval(() => {
 
 ```cjs
 const http = require('node:http');
+const agent = new http.Agent({ keepAlive: true });
 
 // Server has a 5 seconds keep-alive timeout by default
 http
@@ -1488,7 +1513,7 @@ changes:
   - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/25605
     description: The default behavior will return a 431 Request Header
-                 Fields Too Large if a HPE_HEADER_OVERFLOW error occurs.
+                 Fields Too Large if an HPE_HEADER_OVERFLOW error occurs.
   - version: v9.4.0
     pr-url: https://github.com/nodejs/node/pull/17672
     description: The `rawPacket` is the current buffer that just parsed. Adding
@@ -1514,8 +1539,8 @@ This event is guaranteed to be passed an instance of the {net.Socket} class,
 a subclass of {stream.Duplex}, unless the user specifies a socket
 type other than {net.Socket}.
 
-Default behavior is to try close the socket with a HTTP '400 Bad Request',
-or a HTTP '431 Request Header Fields Too Large' in the case of a
+Default behavior is to try close the socket with an HTTP '400 Bad Request',
+or an HTTP '431 Request Header Fields Too Large' in the case of an
 [`HPE_HEADER_OVERFLOW`][] error. If the socket is not writable or headers
 of the current attached [`http.ServerResponse`][] has been sent, it is
 immediately destroyed.
@@ -1661,6 +1686,11 @@ per connection (in the case of HTTP Keep-Alive connections).
 <!-- YAML
 added: v0.1.94
 changes:
+  - version: v24.9.0
+    pr-url: https://github.com/nodejs/node/pull/59824
+    description: Whether this event is fired can now be controlled by the
+                 `shouldUpgradeCallback` and sockets will be destroyed
+                 if upgraded while no event handler is listening.
   - version: v10.0.0
     pr-url: https://github.com/nodejs/node/pull/19981
     description: Not listening to this event no longer causes the socket
@@ -1672,12 +1702,24 @@ changes:
 * `socket` {stream.Duplex} Network socket between the server and client
 * `head` {Buffer} The first packet of the upgraded stream (may be empty)
 
-Emitted each time a client requests an HTTP upgrade. Listening to this event
-is optional and clients cannot insist on a protocol change.
+Emitted each time a client's HTTP upgrade request is accepted. By default
+all HTTP upgrade requests are ignored (i.e. only regular `'request'` events
+are emitted, sticking with the normal HTTP request/response flow) unless you
+listen to this event, in which case they are all accepted (i.e. the `'upgrade'`
+event is emitted instead, and future communication must handled directly
+through the raw socket). You can control this more precisely by using the
+server `shouldUpgradeCallback` option.
+
+Listening to this event is optional and clients cannot insist on a protocol
+change.
 
 After this event is emitted, the request's socket will not have a `'data'`
 event listener, meaning it will need to be bound in order to handle data
 sent to the server on that socket.
+
+If an upgrade is accepted by `shouldUpgradeCallback` but no event handler
+is registered then the socket is destroyed, resulting in an immediate
+connection closure for the client.
 
 This event is guaranteed to be passed an instance of the {net.Socket} class,
 a subclass of {stream.Duplex}, unless the user specifies a socket
@@ -1942,17 +1984,38 @@ added: v8.0.0
 
 The number of milliseconds of inactivity a server needs to wait for additional
 incoming data, after it has finished writing the last response, before a socket
-will be destroyed. If the server receives new data before the keep-alive
-timeout has fired, it will reset the regular inactivity timeout, i.e.,
-[`server.timeout`][].
+will be destroyed.
+
+This timeout value is combined with the
+[`server.keepAliveTimeoutBuffer`][] option to determine the actual socket
+timeout, calculated as:
+socketTimeout = keepAliveTimeout + keepAliveTimeoutBuffer
+If the server receives new data before the keep-alive timeout has fired, it
+will reset the regular inactivity timeout, i.e., [`server.timeout`][].
 
 A value of `0` will disable the keep-alive timeout behavior on incoming
 connections.
-A value of `0` makes the http server behave similarly to Node.js versions prior
+A value of `0` makes the HTTP server behave similarly to Node.js versions prior
 to 8.0.0, which did not have a keep-alive timeout.
 
 The socket timeout logic is set up on connection, so changing this value only
 affects new connections to the server, not any existing connections.
+
+### `server.keepAliveTimeoutBuffer`
+
+<!-- YAML
+added: v24.6.0
+-->
+
+* Type: {number} Timeout in milliseconds. **Default:** `1000` (1 second).
+
+An additional buffer time added to the
+[`server.keepAliveTimeout`][] to extend the internal socket timeout.
+
+This buffer helps reduce connection reset (`ECONNRESET`) errors by increasing
+the socket timeout slightly beyond the advertised keep-alive timeout.
+
+This option applies only to new incoming connections.
 
 ### `server[Symbol.asyncDispose]()`
 
@@ -2109,7 +2172,7 @@ added: v0.4.0
 -->
 
 * `name` {string}
-* Returns: {any}
+* Returns: {number | string | string\[] | undefined}
 
 Reads out a header that's already been queued but not sent to the client.
 The name is case-insensitive. The type of the return value depends
@@ -2234,8 +2297,8 @@ added: v0.7.5
 When true, the Date header will be automatically generated and sent in
 the response if it is not already present in the headers. Defaults to true.
 
-This should only be disabled for testing; HTTP requires the Date header
-in responses.
+This should only be disabled for testing; the Date header is required in
+most HTTP responses (see [RFC 9110 Section 6.6.1][] for details).
 
 ### `response.setHeader(name, value)`
 
@@ -2244,7 +2307,7 @@ added: v0.4.0
 -->
 
 * `name` {string}
-* `value` {any}
+* `value` {number | string | string\[]}
 * Returns: {http.ServerResponse}
 
 Returns the response object.
@@ -2610,7 +2673,36 @@ will check whether `Content-Length` and the length of the body which has
 been transmitted are equal or not.
 
 Attempting to set a header field name or value that contains invalid characters
-will result in a \[`Error`]\[] being thrown.
+will result in a [`TypeError`][] being thrown.
+
+### `response.writeInformation(statusCode[, headers][, callback])`
+
+<!-- YAML
+added: v24.18.0
+-->
+
+* `statusCode` {number} An HTTP 1xx informational status code, between `100`
+  and `199` inclusive, excluding `101` (Switching Protocols) which is only
+  available through the [`'upgrade'`][] event.
+* `headers` {Object|Array} An optional set of headers to send with the
+  informational response. Accepts the same shapes as
+  [`response.writeHead()`][].
+* `callback` {Function} Optional, called once the message has been written
+  to the socket.
+
+Sends an arbitrary HTTP/1.1 1xx informational response to the client. This
+is a generic equivalent of [`response.writeContinue()`][],
+[`response.writeProcessing()`][] and [`response.writeEarlyHints()`][], and
+can be called multiple times before the final response. After the final
+response headers have been sent (via [`response.writeHead()`][] or an
+implicit header), calling this method throws `ERR_HTTP_HEADERS_SENT`.
+
+Clients receive these responses via the [`'information'`][information event]
+event on `http.ClientRequest`.
+
+```js
+response.writeInformation(110, { 'X-Progress': '50%' });
+```
 
 ### `response.writeProcessing()`
 
@@ -2618,7 +2710,7 @@ will result in a \[`Error`]\[] being thrown.
 added: v10.0.0
 -->
 
-Sends a HTTP/1.1 102 Processing message to the client, indicating that
+Sends an HTTP/1.1 102 Processing message to the client, indicating that
 the request body should be sent.
 
 ## Class: `http.IncomingMessage`
@@ -2903,6 +2995,51 @@ added: v0.5.9
 * Returns: {http.IncomingMessage}
 
 Calls `message.socket.setTimeout(msecs, callback)`.
+
+### `message.signal`
+
+<!-- YAML
+added: v24.16.0
+-->
+
+* Type: {AbortSignal}
+
+An {AbortSignal} that is aborted when the underlying socket closes or the
+request is destroyed. The signal is created lazily on first access — no
+{AbortController} is allocated for requests that never use this property.
+
+This is useful for cancelling downstream asynchronous work such as database
+queries or `fetch` calls when a client disconnects mid-request.
+
+```mjs
+import http from 'node:http';
+
+http.createServer(async (req, res) => {
+  try {
+    const data = await fetch('https://example.com/api', { signal: req.signal });
+    res.end(JSON.stringify(await data.json()));
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    res.statusCode = 500;
+    res.end('Internal Server Error');
+  }
+}).listen(3000);
+```
+
+```cjs
+const http = require('node:http');
+
+http.createServer(async (req, res) => {
+  try {
+    const data = await fetch('https://example.com/api', { signal: req.signal });
+    res.end(JSON.stringify(await data.json()));
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    res.statusCode = 500;
+    res.end('Internal Server Error');
+  }
+}).listen(3000);
+```
 
 ### `message.socket`
 
@@ -3195,7 +3332,7 @@ added: v0.4.0
 -->
 
 * `name` {string} Name of header
-* Returns: {string | undefined}
+* Returns: {number | string | string\[] | undefined}
 
 Gets the value of the HTTP header with the given name. If that header is not
 set, the returned value will be `undefined`.
@@ -3297,7 +3434,7 @@ added: v0.4.0
 -->
 
 * `name` {string} Header name
-* `value` {any} Header value
+* `value` {number | string | string\[]} Header value
 * Returns: {this}
 
 Sets a single header value. If the header already exists in the to-be-sent
@@ -3504,6 +3641,12 @@ Found'`.
 <!-- YAML
 added: v0.1.13
 changes:
+  - version: v24.12.0
+    pr-url: https://github.com/nodejs/node/pull/59778
+    description: Add optimizeEmptyRequests option.
+  - version: v24.9.0
+    pr-url: https://github.com/nodejs/node/pull/59824
+    description: The `shouldUpgradeCallback` option is now supported.
   - version:
     - v20.1.0
     - v18.17.0
@@ -3550,7 +3693,7 @@ changes:
     `readableHighWaterMark` and `writableHighWaterMark`. This affects
     `highWaterMark` property of both `IncomingMessage` and `ServerResponse`.
     **Default:** See [`stream.getDefaultHighWaterMark()`][].
-  * `insecureHTTPParser` {boolean} If set to `true`, it will use a HTTP parser
+  * `insecureHTTPParser` {boolean} If set to `true`, it will use an HTTP parser
     with leniency flags enabled. Using the insecure parser should be avoided.
     See [`--insecure-http-parser`][] for more information.
     **Default:** `false`.
@@ -3593,11 +3736,23 @@ changes:
   * `ServerResponse` {http.ServerResponse} Specifies the `ServerResponse` class
     to be used. Useful for extending the original `ServerResponse`. **Default:**
     `ServerResponse`.
+  * `shouldUpgradeCallback(request)` {Function} A callback which receives an
+    incoming request and returns a boolean, to control which upgrade attempts
+    should be accepted. Accepted upgrades will fire an `'upgrade'` event (or
+    their sockets will be destroyed, if no listener is registered) while
+    rejected upgrades will fire a `'request'` event like any non-upgrade
+    request. This options defaults to
+    `() => server.listenerCount('upgrade') > 0`.
   * `uniqueHeaders` {Array} A list of response headers that should be sent only
     once. If the header's value is an array, the items will be joined
     using `; `.
   * `rejectNonStandardBodyWrites` {boolean} If set to `true`, an error is thrown
     when writing to an HTTP response which does not have a body.
+    **Default:** `false`.
+  * `optimizeEmptyRequests` {boolean} If set to `true`, requests without `Content-Length`
+    or `Transfer-Encoding` headers (indicating no body) will be initialized with an
+    already-ended body stream, so they will never emit any stream events
+    (like `'data'` or `'end'`). You can use `req.readableEnded` to detect this case.
     **Default:** `false`.
 
 * `requestListener` {Function}
@@ -3849,7 +4004,7 @@ changes:
     request to. **Default:** `'localhost'`.
   * `hostname` {string} Alias for `host`. To support [`url.parse()`][],
     `hostname` will be used if both `host` and `hostname` are specified.
-  * `insecureHTTPParser` {boolean} If set to `true`, it will use a HTTP parser
+  * `insecureHTTPParser` {boolean} If set to `true`, it will use an HTTP parser
     with leniency flags enabled. Using the insecure parser should be avoided.
     See [`--insecure-http-parser`][] for more information.
     **Default:** `false`
@@ -4256,6 +4411,32 @@ added:
 
 Set the maximum number of idle HTTP parsers.
 
+## `http.setGlobalProxyFromEnv([proxyEnv])`
+
+<!-- YAML
+added:
+  - v24.14.0
+-->
+
+* `proxyEnv` {Object} An object containing proxy configuration. This accepts the
+  same options as the `proxyEnv` option accepted by [`Agent`][]. **Default:**
+  `process.env`.
+* Returns: {Function} A function that restores the original agent and dispatcher
+  settings to the state before this `http.setGlobalProxyFromEnv()` is invoked.
+
+Dynamically resets the global configurations to enable built-in proxy support for
+`fetch()` and `http.request()`/`https.request()` at runtime, as an alternative
+to using the `--use-env-proxy` flag or `NODE_USE_ENV_PROXY` environment variable.
+It can also be used to override settings configured from the environment variables.
+
+As this function resets the global configurations, any previously configured
+`http.globalAgent`, `https.globalAgent` or undici global dispatcher would be
+overridden after this function is invoked. It's recommended to invoke it before any
+requests are made and avoid invoking it in the middle of any requests.
+
+See [Built-in Proxy Support][] for details on proxy URL formats and `NO_PROXY`
+syntax.
+
 ## Class: `WebSocket`
 
 <!-- YAML
@@ -4276,6 +4457,9 @@ added: v24.5.0
 When Node.js creates the global agent, if the `NODE_USE_ENV_PROXY` environment variable is
 set to `1` or `--use-env-proxy` is enabled, the global agent will be constructed
 with `proxyEnv: process.env`, enabling proxy support based on the environment variables.
+
+To enable proxy support dynamically and globally, use [`http.setGlobalProxyFromEnv()`][].
+
 Custom agents can also be created with proxy support by passing a
 `proxyEnv` option when constructing the agent. The value can be `process.env`
 if they just want to inherit the configuration from the environment variables,
@@ -4331,6 +4515,86 @@ Or the `--use-env-proxy` flag.
 HTTP_PROXY=http://proxy.example.com:8080 NO_PROXY=localhost,127.0.0.1 node --use-env-proxy client.js
 ```
 
+To enable proxy support dynamically and globally with `process.env` (the default option of `http.setGlobalProxyFromEnv()`):
+
+```cjs
+const http = require('node:http');
+
+// Reads proxy-related environment variables from process.env
+const restore = http.setGlobalProxyFromEnv();
+
+// Subsequent requests will use the configured proxies from environment variables
+http.get('http://www.example.com', (res) => {
+  // This request will be proxied if HTTP_PROXY or http_proxy is set
+});
+
+fetch('https://www.example.com', (res) => {
+  // This request will be proxied if HTTPS_PROXY or https_proxy is set
+});
+
+// To restore the original global agent and dispatcher settings, call the returned function.
+// restore();
+```
+
+```mjs
+import http from 'node:http';
+
+// Reads proxy-related environment variables from process.env
+http.setGlobalProxyFromEnv();
+
+// Subsequent requests will use the configured proxies from environment variables
+http.get('http://www.example.com', (res) => {
+  // This request will be proxied if HTTP_PROXY or http_proxy is set
+});
+
+fetch('https://www.example.com', (res) => {
+  // This request will be proxied if HTTPS_PROXY or https_proxy is set
+});
+
+// To restore the original global agent and dispatcher settings, call the returned function.
+// restore();
+```
+
+To enable proxy support dynamically and globally with custom settings:
+
+```cjs
+const http = require('node:http');
+
+const restore = http.setGlobalProxyFromEnv({
+  http_proxy: 'http://proxy.example.com:8080',
+  https_proxy: 'https://proxy.example.com:8443',
+  no_proxy: 'localhost,127.0.0.1,.internal.example.com',
+});
+
+// Subsequent requests will use the configured proxies
+http.get('http://www.example.com', (res) => {
+  // This request will be proxied through proxy.example.com:8080
+});
+
+fetch('https://www.example.com', (res) => {
+  // This request will be proxied through proxy.example.com:8443
+});
+```
+
+```mjs
+import http from 'node:http';
+
+http.setGlobalProxyFromEnv({
+  http_proxy: 'http://proxy.example.com:8080',
+  https_proxy: 'https://proxy.example.com:8443',
+  no_proxy: 'localhost,127.0.0.1,.internal.example.com',
+});
+
+// Subsequent requests will use the configured proxies
+http.get('http://www.example.com', (res) => {
+  // This request will be proxied through proxy.example.com:8080
+});
+
+fetch('https://www.example.com', (res) => {
+  // This request will be proxied through proxy.example.com:8443
+});
+```
+
 To create a custom agent with built-in proxy support:
 
 ```cjs
@@ -4364,6 +4628,7 @@ const agent2 = new http.Agent({ proxyEnv: process.env });
 
 [Built-in Proxy Support]: #built-in-proxy-support
 [RFC 8187]: https://www.rfc-editor.org/rfc/rfc8187.txt
+[RFC 9110 Section 6.6.1]: https://www.rfc-editor.org/rfc/rfc9110#section-6.6.1
 [`'ERR_HTTP_CONTENT_LENGTH_MISMATCH'`]: errors.md#err_http_content_length_mismatch
 [`'checkContinue'`]: #event-checkcontinue
 [`'finish'`]: #event-finish
@@ -4394,6 +4659,7 @@ const agent2 = new http.Agent({ proxyEnv: process.env });
 [`http.get()`]: #httpgetoptions-callback
 [`http.globalAgent`]: #httpglobalagent
 [`http.request()`]: #httprequestoptions-callback
+[`http.setGlobalProxyFromEnv()`]: #httpsetglobalproxyfromenvproxyenv
 [`message.headers`]: #messageheaders
 [`message.rawHeaders`]: #messagerawheaders
 [`message.socket`]: #messagesocket
@@ -4429,9 +4695,12 @@ const agent2 = new http.Agent({ proxyEnv: process.env });
 [`response.write()`]: #responsewritechunk-encoding-callback
 [`response.write(data, encoding)`]: #responsewritechunk-encoding-callback
 [`response.writeContinue()`]: #responsewritecontinue
+[`response.writeEarlyHints()`]: #responsewriteearlyhintshints-callback
 [`response.writeHead()`]: #responsewriteheadstatuscode-statusmessage-headers
+[`response.writeProcessing()`]: #responsewriteprocessing
 [`server.close()`]: #serverclosecallback
 [`server.headersTimeout`]: #serverheaderstimeout
+[`server.keepAliveTimeoutBuffer`]: #serverkeepalivetimeoutbuffer
 [`server.keepAliveTimeout`]: #serverkeepalivetimeout
 [`server.listen()`]: net.md#serverlisten
 [`server.requestTimeout`]: #serverrequesttimeout
@@ -4449,4 +4718,5 @@ const agent2 = new http.Agent({ proxyEnv: process.env });
 [`writable.destroyed`]: stream.md#writabledestroyed
 [`writable.uncork()`]: stream.md#writableuncork
 [`writable.write()`]: stream.md#writablewritechunk-encoding-callback
+[information event]: #event-information
 [initial delay]: net.md#socketsetkeepaliveenable-initialdelay

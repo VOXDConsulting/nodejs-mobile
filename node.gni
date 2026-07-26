@@ -26,8 +26,6 @@ declare_args() {
   # TODO(zcbenz): This is currently copied from configure.py, we should share
   # the list between configure.py and GN configurations.
   node_builtin_shareable_builtins = [
-    "deps/cjs-module-lexer/lexer.js",
-    "deps/cjs-module-lexer/dist/lexer.js",
     "deps/undici/undici.js",
     "deps/amaro/dist/index.js",
   ]
@@ -41,6 +39,9 @@ declare_args() {
   # Build node with SSL support.
   # The variable is called "openssl" for parity with node's GYP build.
   node_use_openssl = true
+
+  # Build node with SQLite support.
+  node_use_sqlite = true
 
   # Use the specified path to system CA (PEM format) in addition to
   # the BoringSSL supplied CA store or compiled-in Mozilla CA copy.

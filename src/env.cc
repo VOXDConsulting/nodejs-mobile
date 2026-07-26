@@ -122,9 +122,9 @@ void Environment::ResetPromiseHooks(Local<Function> init,
 // Remember to keep this code aligned with pushAsyncContext() in JS.
 void AsyncHooks::push_async_context(double async_id,
                                     double trigger_async_id,
-                                    Local<Object> resource) {
-  // Since async_hooks is experimental, do only perform the check
-  // when async_hooks is enabled.
+                                    Local<Object>* resource) {
+  CHECK_IMPLIES(resource != nullptr, !resource->IsEmpty());
+
   if (fields_[kCheck] > 0) {
     CHECK_GE(async_id, -1);
     CHECK_GE(trigger_async_id, -1);
@@ -140,14 +140,14 @@ void AsyncHooks::push_async_context(double async_id,
 
 #ifdef DEBUG
   for (uint32_t i = offset; i < native_execution_async_resources_.size(); i++)
-    CHECK(native_execution_async_resources_[i].IsEmpty());
+    CHECK_NULL(native_execution_async_resources_[i]);
 #endif
 
   // When this call comes from JS (as a way of increasing the stack size),
   // `resource` will be empty, because JS caches these values anyway.
-  if (!resource.IsEmpty()) {
+  if (resource != nullptr) {
     native_execution_async_resources_.resize(offset + 1);
-    // Caveat: This is a v8::Local<> assignment, we do not keep a v8::Global<>!
+    // Caveat: This is a v8::Local<>* assignment, we do not keep a v8::Global<>!
     native_execution_async_resources_[offset] = resource;
   }
 }
@@ -172,11 +172,11 @@ bool AsyncHooks::pop_async_context(double async_id) {
   fields_[kStackLength] = offset;
 
   if (offset < native_execution_async_resources_.size() &&
-      !native_execution_async_resources_[offset].IsEmpty()) [[likely]] {
+      native_execution_async_resources_[offset] != nullptr) [[likely]] {
 #ifdef DEBUG
     for (uint32_t i = offset + 1; i < native_execution_async_resources_.size();
          i++) {
-      CHECK(native_execution_async_resources_[i].IsEmpty());
+      CHECK_NULL(native_execution_async_resources_[i]);
     }
 #endif
     native_execution_async_resources_.resize(offset);
@@ -784,7 +784,8 @@ Environment::Environment(IsolateData* isolate_data,
                          const std::vector<std::string>& exec_args,
                          const EnvSerializeInfo* env_info,
                          EnvironmentFlags::Flags flags,
-                         ThreadId thread_id)
+                         ThreadId thread_id,
+                         std::string_view thread_name)
     : isolate_(isolate),
       external_memory_accounter_(new ExternalMemoryAccounter()),
       isolate_data_(isolate_data),
@@ -811,7 +812,8 @@ Environment::Environment(IsolateData* isolate_data,
       flags_(flags),
       thread_id_(thread_id.id == static_cast<uint64_t>(-1)
                      ? AllocateEnvironmentThreadId().id
-                     : thread_id.id) {
+                     : thread_id.id),
+      thread_name_(thread_name) {
   if (!is_main_thread()) {
     // If this is a Worker thread, we can always safely use the parent's
     // Isolate's code cache because of the shared read-only heap.
@@ -892,18 +894,12 @@ Environment::Environment(IsolateData* isolate_data,
 
   if (*TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
           TRACING_CATEGORY_NODE1(environment)) != 0) {
-    auto traced_value = tracing::TracedValue::Create();
-    traced_value->BeginArray("args");
-    for (const std::string& arg : args) traced_value->AppendString(arg);
-    traced_value->EndArray();
-    traced_value->BeginArray("exec_args");
-    for (const std::string& arg : exec_args) traced_value->AppendString(arg);
-    traced_value->EndArray();
+    tracing::EnvironmentArgs traced_value(args, exec_args);
     TRACE_EVENT_NESTABLE_ASYNC_BEGIN1(TRACING_CATEGORY_NODE1(environment),
                                       "Environment",
                                       this,
                                       "args",
-                                      std::move(traced_value));
+                                      tracing::CastTracedValue(traced_value));
   }
 
   if (options_->permission) {
@@ -915,8 +911,10 @@ Environment::Environment(IsolateData* isolate_data,
       options_->allow_native_addons = false;
       permission()->Apply(this, {"*"}, permission::PermissionScope::kAddon);
     }
-    flags_ = flags_ | EnvironmentFlags::kNoCreateInspector;
-    permission()->Apply(this, {"*"}, permission::PermissionScope::kInspector);
+    if (!options_->allow_inspector) {
+      flags_ = flags_ | EnvironmentFlags::kNoCreateInspector;
+      permission()->Apply(this, {"*"}, permission::PermissionScope::kInspector);
+    }
     if (!options_->allow_child_process) {
       permission()->Apply(
           this, {"*"}, permission::PermissionScope::kChildProcess);
@@ -1062,6 +1060,13 @@ Environment::~Environment() {
   }
 
   delete external_memory_accounter_;
+  if (cpu_profiler_) {
+    for (auto& it : pending_profiles_) {
+      cpu_profiler_->Stop(it);
+    }
+    cpu_profiler_->Dispose();
+    cpu_profiler_ = nullptr;
+  }
 }
 
 void Environment::InitializeLibuv() {
@@ -1118,11 +1123,21 @@ void Environment::InitializeCompileCache() {
       dir_from_env.empty()) {
     return;
   }
-  EnableCompileCache(dir_from_env);
+  std::string portable_env;
+  bool portable = credentials::SafeGetenv(
+                      "NODE_COMPILE_CACHE_PORTABLE", &portable_env, this) &&
+                  !portable_env.empty() && portable_env == "1";
+  if (portable) {
+    Debug(this,
+          DebugCategory::COMPILE_CACHE,
+          "[compile cache] using relative path\n");
+  }
+  EnableCompileCache(dir_from_env,
+                     portable ? EnableOption::PORTABLE : EnableOption::DEFAULT);
 }
 
 CompileCacheEnableResult Environment::EnableCompileCache(
-    const std::string& cache_dir) {
+    const std::string& cache_dir, EnableOption option) {
   CompileCacheEnableResult result;
   std::string disable_env;
   if (credentials::SafeGetenv(
@@ -1139,7 +1154,7 @@ CompileCacheEnableResult Environment::EnableCompileCache(
   if (!compile_cache_handler_) {
     std::unique_ptr<CompileCacheHandler> handler =
         std::make_unique<CompileCacheHandler>(this);
-    result = handler->Enable(this, cache_dir);
+    result = handler->Enable(this, cache_dir, option);
     if (result.status == CompileCacheEnableStatus::ENABLED) {
       compile_cache_handler_ = std::move(handler);
       AtExit(
@@ -1714,14 +1729,13 @@ AsyncHooks::AsyncHooks(Isolate* isolate, const SerializeInfo* info)
       fields_(isolate, kFieldsCount, MAYBE_FIELD_PTR(info, fields)),
       async_id_fields_(
           isolate, kUidFieldsCount, MAYBE_FIELD_PTR(info, async_id_fields)),
-      native_execution_async_resources_(isolate),
       info_(info) {
   HandleScope handle_scope(isolate);
   if (info == nullptr) {
     clear_async_id_stack();
 
     // Always perform async_hooks checks, not just when async_hooks is enabled.
-    // TODO(AndreasMadsen): Consider removing this for LTS releases.
+    // Can be disabled via CLI option --no-force-async-hooks-checks
     // See discussion in https://github.com/nodejs/node/pull/15454
     // When removing this, do it by reverting the commit. Otherwise the test
     // and flag changes won't be included.
@@ -1803,10 +1817,9 @@ AsyncHooks::SerializeInfo AsyncHooks::Serialize(Local<Context> context,
       native_execution_async_resources_.size());
   for (size_t i = 0; i < native_execution_async_resources_.size(); i++) {
     info.native_execution_async_resources[i] =
-        native_execution_async_resources_[i].IsEmpty() ? SIZE_MAX :
-            creator->AddData(
-                context,
-                native_execution_async_resources_[i]);
+        native_execution_async_resources_[i] == nullptr
+            ? SIZE_MAX
+            : creator->AddData(context, *native_execution_async_resources_[i]);
   }
 
   // At the moment, promise hooks are not supported in the startup snapshot.
@@ -2168,7 +2181,7 @@ size_t Environment::NearHeapLimitCallback(void* data,
     env->RemoveHeapSnapshotNearHeapLimitCallback(0);
   }
 
-  FPrintF(stderr, "Wrote snapshot to %s\n", filename.c_str());
+  FPrintF(stderr, "Wrote snapshot to %s\n", filename);
   // Tell V8 to reset the heap limit once the heap usage falls down to
   // 95% of the initial limit.
   env->isolate()->AutomaticallyRestoreInitialHeapLimit(0.95);
@@ -2225,4 +2238,33 @@ void Environment::MemoryInfo(MemoryTracker* tracker) const {
 void Environment::RunWeakRefCleanup() {
   isolate()->ClearKeptObjects();
 }
+
+v8::CpuProfilingResult Environment::StartCpuProfile() {
+  HandleScope handle_scope(isolate());
+  if (!cpu_profiler_) {
+    cpu_profiler_ = v8::CpuProfiler::New(isolate());
+  }
+  v8::CpuProfilingResult result = cpu_profiler_->Start(
+      v8::CpuProfilingOptions{v8::CpuProfilingMode::kLeafNodeLineNumbers,
+                              v8::CpuProfilingOptions::kNoSampleLimit});
+  if (result.status == v8::CpuProfilingStatus::kStarted) {
+    pending_profiles_.push_back(result.id);
+  }
+  return result;
+}
+
+v8::CpuProfile* Environment::StopCpuProfile(v8::ProfilerId profile_id) {
+  if (!cpu_profiler_) {
+    return nullptr;
+  }
+  auto it =
+      std::find(pending_profiles_.begin(), pending_profiles_.end(), profile_id);
+  if (it == pending_profiles_.end()) {
+    return nullptr;
+  }
+  v8::CpuProfile* profile = cpu_profiler_->Stop(*it);
+  pending_profiles_.erase(it);
+  return profile;
+}
+
 }  // namespace node

@@ -7,8 +7,6 @@
 .*
 # Exclude specific dotfiles that we want to track.
 !deps/**/.*
-!.devcontainer/
-!.devcontainer/.devcontainer.json
 !test/fixtures/**/.*
 !.clang-format
 !.cpplint
@@ -22,6 +20,7 @@
 !.nycrc
 !.yamllint.yaml
 !.configurations/
+!/.npmrc
 
 # === Rules for root dir ===
 /core
@@ -32,6 +31,7 @@
 /tags
 /tags.*
 /doc/api.xml
+/docs/
 /node
 /node_g
 /gon-config.json
@@ -145,6 +145,7 @@ tools/*/*.i.tmp
 /deps/**/.github/
 # Ignore dependencies fetched by tools/v8/fetch_deps.py
 /deps/.cipd
+!deps/LIEF/**
 
 # === Rules for Windows vcbuild.bat ===
 /temp-vcbuild
@@ -158,6 +159,10 @@ cmake_install.cmake
 install_manifest.txt
 *.cbp
 
+# === Rules for AI assistants ===
+CLAUDE.md
+AGENTS.md
+
 # === Global Rules ===
 # Keep last to avoid being excluded
 *.pyc
@@ -167,3 +172,10 @@ __pycache__
 
 # === Rules for C++ development ===
 compile_commands.json
+
+# === Dev Container rules ===
+# Only track the shared base devcontainer.json; ignore everything else under .devcontainer
+!.devcontainer/
+.devcontainer/**
+!.devcontainer/base/
+!.devcontainer/base/devcontainer.json
