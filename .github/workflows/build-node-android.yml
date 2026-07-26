@@ -42,7 +42,7 @@ jobs:
 
       - name: Build Android runtime
         env:
-          LDFLAGS: -Wl,-z,max-page-size=16384
+          LDFLAGS: -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384
         run: |
           ./tools/android_build.sh \
             "$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
