@@ -19,7 +19,7 @@ jobs:
   build-android:
     name: Build ${{ matrix.target_arch }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
