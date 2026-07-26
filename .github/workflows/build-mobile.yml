@@ -22,7 +22,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { os: ubuntu-22.04, target_arch: arm }
           - { os: ubuntu-22.04, target_arch: arm64 }
           - { os: ubuntu-22.04, target_arch: x86_64 }
           
