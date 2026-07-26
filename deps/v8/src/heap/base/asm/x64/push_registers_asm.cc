@@ -35,6 +35,8 @@ asm(
     ".hidden PushAllRegistersAndIterateStack            \n"
     "PushAllRegistersAndIterateStack:                   \n"
 #endif  // !__APPLE__
+// nodejs-mobile patch: actually, we SHOULD depend on V8_TARGET_* defines.
+#ifndef V8_TARGET_ARCH_ARM
     // rbp is callee-saved. Maintain proper frame pointer for debugging.
     "  push %rbp                                        \n"
     "  mov %rsp, %rbp                                   \n"
@@ -57,6 +59,7 @@ asm(
     "  add $48, %rsp                                    \n"
     // Restore rbp as it was used as frame pointer.
     "  pop %rbp                                         \n"
+#endif // !V8_TARGET_ARCH_ARM
     "  ret                                              \n"
 #if !defined(__APPLE__)
     ".Lfunc_end0:                                       \n"
