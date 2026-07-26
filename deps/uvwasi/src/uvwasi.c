@@ -1439,9 +1439,12 @@ uvwasi_errno_t uvwasi_fd_readdir(uvwasi_t* uvwasi,
   dir->nentries = UVWASI__READDIR_NUM_ENTRIES;
   uv_fs_req_cleanup(&req);
 
+#if (!defined(__ANDROID__) || __ANDROID_API__ >= 23)
   /* Seek to the proper location in the directory. */
+  /* seekdir is also not available on Android API < 23. */
   if (cookie != UVWASI_DIRCOOKIE_START)
     seekdir(dir->dir, cookie);
+#endif  /* ANDROID_API >= 23 */
 
   /* Read the directory entries into the provided buffer. */
   err = UVWASI_ESUCCESS;
@@ -1456,12 +1459,17 @@ uvwasi_errno_t uvwasi_fd_readdir(uvwasi_t* uvwasi,
     available = 0;
 
     for (i = 0; i < r; i++) {
+#if (!defined(__ANDROID__) || __ANDROID_API__ >= 23)
       tell = telldir(dir->dir);
       if (tell < 0) {
         err = uvwasi__translate_uv_error(uv_translate_sys_error(errno));
         uv_fs_req_cleanup(&req);
         goto exit;
       }
+#else
+      tell = 0;
+      /* seekdir is also not available on Android API < 23. */
+#endif  /* ANDROID_API >= 23 */
 
       name_len = strlen(dirents[i].name);
       dirent.d_next = (uvwasi_dircookie_t) tell;

@@ -362,7 +362,16 @@ class PerProcessOptions : public Options {
   bool disable_wasm_trap_handler = false;
 
   // Per-process because reports can be triggered outside a known V8 context.
+  // nodejs-mobile: on Android/iOS the embedder process dies on OOM/fatal V8
+  // errors without a tombstone (V8 calls ABORT() inside the host app), so the
+  // diagnostic report file is the only post-mortem signal. Default it on for
+  // mobile so users can ship the file back without having to enable the flag
+  // manually.
+#if defined(__ANDROID__) || defined(__APPLE__)
+  bool report_on_fatalerror = true;
+#else
   bool report_on_fatalerror = false;
+#endif
   bool report_compact = false;
   std::string report_directory;
   std::string report_filename;

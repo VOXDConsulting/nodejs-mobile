@@ -1,0 +1,139 @@
+name: Build Nodejs-Mobile Android Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch/tag/commit)"
+        required: false
+        default: "main"
+      sdk_version:
+        description: "Android SDK API level passed to android_build.sh"
+        required: false
+        default: "26"
+      target_arch:
+        description: "Optional target arch (arm64|arm|x64|x86). Empty means all."
+        required: false
+        default: ""
+      ndk_version:
+        description: "Android NDK version"
+        required: false
+        default: "29.0.14206865"
+      release_tag:
+        description: "Optional release tag to publish (empty = artifact only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install build utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "ndk;${{ inputs.ndk_version }}"
+
+      - name: Build runtime
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ inputs.ndk_version }}
+        run: |
+          set -euo pipefail
+          test -d "$ANDROID_NDK_HOME"
+          chmod +x tools/android_build.sh
+
+          if [ -n "${{ inputs.target_arch }}" ]; then
+            ./tools/android_build.sh "$ANDROID_NDK_HOME" "${{ inputs.sdk_version }}" "${{ inputs.target_arch }}"
+          else
+            ./tools/android_build.sh "$ANDROID_NDK_HOME" "${{ inputs.sdk_version }}"
+          fi
+
+      - name: Package runtime zip for Luker
+        id: pack
+        run: |
+          set -euo pipefail
+          mkdir -p dist/runtime
+
+          detect_abi() {
+            case "$1" in
+              *arm64-v8a*|*android-arm64*|*/arm64/*) echo "arm64-v8a" ;;
+              *armeabi-v7a*|*android-arm*|*/arm/*) echo "armeabi-v7a" ;;
+              *x86_64*|*android-x64*|*/x64/*) echo "x86_64" ;;
+              */x86/*|*android-x86*) echo "x86" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          mapfile -t so_files < <(find . -type f -name "libnode.so")
+          if [ "${#so_files[@]}" -eq 0 ]; then
+            echo "No libnode.so found after build."
+            exit 1
+          fi
+
+          node_header="$(find . -type f -path "*/include/node/node.h" | head -n 1 || true)"
+          if [ -z "$node_header" ]; then
+            echo "node.h not found after build."
+            exit 1
+          fi
+
+          include_root="$(dirname "$(dirname "$node_header")")"
+          cp -a "$include_root/include" dist/runtime/include
+
+          copied=0
+          for so in "${so_files[@]}"; do
+            abi="$(detect_abi "$so")"
+            if [ -z "$abi" ]; then
+              continue
+            fi
+            mkdir -p "dist/runtime/$abi"
+            cp -f "$so" "dist/runtime/$abi/libnode.so"
+            copied=$((copied + 1))
+          done
+
+          if [ "$copied" -eq 0 ]; then
+            echo "libnode.so found, but ABI detection failed."
+            exit 1
+          fi
+
+          zip_name="nodejs-mobile-android-${{ inputs.ref }}-${{ github.run_number }}.zip"
+          zip_name="${zip_name//\//-}"
+          (
+            cd dist/runtime
+            zip -qr "../$zip_name" .
+          )
+
+          echo "zip_name=$zip_name" >> "$GITHUB_OUTPUT"
+          echo "zip_path=dist/$zip_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-mobile-android-runtime
+          path: ${{ steps.pack.outputs.zip_path }}
+
+      - name: Publish release
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ inputs.release_tag }}" "${{ steps.pack.outputs.zip_path }}" \
+            --target "${GITHUB_SHA}" \
+            --title "${{ inputs.release_tag }}" \
+            --notes "Automated Android runtime build for ref: ${{ inputs.ref }}"

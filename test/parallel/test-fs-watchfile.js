@@ -84,7 +84,7 @@ watcher.on('stop', common.mustCall());
 
 // Watch events should callback with a filename on supported systems.
 // Omitting AIX. It works but not reliably.
-if (common.isLinux || common.isMacOS || common.isWindows) {
+if (common.isLinux || common.isMacOS || common.isWindows || common.isAndroid) {
   const dir = tmpdir.resolve('watch');
   function doWatch() {
     const handle = fs.watch(dir, common.mustCall(function(eventType, filename) {

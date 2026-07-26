@@ -3,8 +3,10 @@ const common = require('../common');
 const assert = require('assert');
 
 // Import of pure js (non-shared) deps for comparison
-const acorn = require('../../deps/acorn/acorn/package.json');
-const cjs_module_lexer = require('../../deps/cjs-module-lexer/src/package.json');
+// nodejs-mobile patch to hard code this version since we don't have access to
+// root-level "deps" folder inside the mobile app
+// const acorn = require('../../deps/acorn/acorn/package.json');
+// const cjs_module_lexer = require('../../deps/cjs-module-lexer/package.json');
 
 const expected_keys = [
   'ares',
@@ -26,6 +28,9 @@ const expected_keys = [
   'nbytes',
 ];
 
+if (common.isAndroid || common.isIOS) {
+  expected_keys.push('mobile');
+}
 
 const hasUndici = process.config.variables.node_builtin_shareable_builtins.includes('deps/undici/undici.js');
 const hasAmaro = process.config.variables.node_builtin_shareable_builtins.includes('deps/amaro/dist/index.js');
@@ -116,12 +121,18 @@ assert.strictEqual(process.config.variables.napi_build_version,
                    process.versions.napi);
 
 if (hasUndici) {
-  const undici = require('../../deps/undici/src/package.json');
-  const expectedUndiciVersion = undici.version;
+  // nodejs-mobile patch to hard code this version since we don't have access to
+  // root-level "deps" folder inside the mobile app
+  // const undici = require('../../deps/undici/src/package.json');
+  const expectedUndiciVersion = '7.12.0'; // undici.version;
   assert.strictEqual(process.versions.undici, expectedUndiciVersion);
 }
 
-const expectedAcornVersion = acorn.version;
+// nodejs-mobile patch to hard code this version since we don't have access to
+// root-level "deps" folder inside the mobile app
+const expectedAcornVersion = '8.15.0'; // acorn.version;
 assert.strictEqual(process.versions.acorn, expectedAcornVersion);
-const expectedCjsModuleLexerVersion = cjs_module_lexer.version;
+// nodejs-mobile patch to hard code this version since we don't have access to
+// root-level "deps" folder inside the mobile app
+const expectedCjsModuleLexerVersion = '2.1.0'; // cjs_module_lexer.version;
 assert.strictEqual(process.versions.cjs_module_lexer, expectedCjsModuleLexerVersion);

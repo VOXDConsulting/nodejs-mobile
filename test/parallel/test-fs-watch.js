@@ -24,14 +24,14 @@ class WatchTestCase {
 const cases = [
   // Watch on a file should callback with a filename on supported systems
   new WatchTestCase(
-    common.isLinux || common.isMacOS || common.isWindows || common.isAIX,
+    common.isLinux || common.isMacOS || common.isWindows || common.isAIX || common.isAndroid || common.isIOS,
     'watch1',
     'foo',
     'filePath'
   ),
   // Watch on a directory should callback with a filename on supported systems
   new WatchTestCase(
-    common.isLinux || common.isMacOS || common.isWindows,
+    common.isLinux || common.isMacOS || common.isWindows || common.isAndroid,
     'watch2',
     'bar',
     'dirPath'
@@ -60,7 +60,7 @@ function doWatchTest(testCase) {
       clearInterval(interval);
       interval = null;
     }
-    if (common.isMacOS)
+    if (common.isMacOS || common.isIOS)
       assert.strictEqual(['rename', 'change'].includes(eventType), true);
     else
       assert.strictEqual(eventType, 'change');
@@ -87,7 +87,7 @@ for (const testCase of cases) {
   // Long content so it's actually flushed.
   const content1 = Date.now() + testCase.fileName.toLowerCase().repeat(1e4);
   fs.writeFileSync(testCase.filePath, content1);
-  if (common.isMacOS) {
+  if (common.isMacOS || common.isIOS) {
     // On macOS delay watcher start to avoid leaking previous events.
     // Refs: https://github.com/libuv/libuv/pull/4503
     setTimeout(() => {

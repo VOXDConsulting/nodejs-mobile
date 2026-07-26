@@ -293,17 +293,12 @@ size_t Heap::MaxOldGenerationSize(uint64_t physical_memory) {
   // Increase the heap size from 2GB to 4GB for 64-bit systems with physical
   // memory at least 16GB. The threshold is set to 15GB to accommodate for some
   // memory being reserved by the hardware.
+  // nodejs-mobile: Android now uses the same kHeapLimitMultiplier as desktop
+  // 64-bit (see heap.h), so kMaxSize is 2 GB on both and the doubling path
+  // applies uniformly.
 #ifdef V8_HOST_ARCH_64_BIT
   if ((physical_memory / GB) >= 15) {
-#if V8_OS_ANDROID
-    // As of 2024, Android devices with 16GiB are shipping (for instance the
-    // Pixel 9 Pro). However, a large fraction of their memory is not usable,
-    // and there is no disk swap, so heaps are still smaller than on desktop for
-    // now.
-    DCHECK_EQ(max_size / GB, 1u);
-#else
     DCHECK_EQ(max_size / GB, 2u);
-#endif
     max_size *= 2;
   }
 #endif  // V8_HOST_ARCH_64_BIT

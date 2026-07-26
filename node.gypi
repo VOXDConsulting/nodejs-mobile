@@ -254,6 +254,11 @@
         'NODE_PLATFORM="darwin"',
       ],
     }],
+    # nodejs-mobile patch: link CoreFoundation and Security frameworks when compiling for iOS
+    [ 'OS=="ios"', {
+      # linking Corefoundation and Security is needed for crypto functionality
+      'libraries': [ '-framework CoreFoundation -framework Security' ],
+    }],
     [ 'OS=="freebsd"', {
       'libraries': [
         '-lutil',
@@ -332,7 +337,7 @@
         ],
       },
     }],
-    [ 'coverage=="true" and node_shared=="false" and OS in "mac freebsd linux openharmony"', {
+    [ 'coverage=="true" and node_shared=="false" and OS in "mac ios freebsd linux openharmony"', {
       'cflags!': [ '-O3' ],
       'ldflags': [ '--coverage',
                    '-g',
@@ -380,11 +385,15 @@
           'defines': [ 'OPENSSL_API_COMPAT=0x10100000L', ],
           'dependencies': [
             './deps/openssl/openssl.gyp:openssl',
-
-            # For tests
-            './deps/openssl/openssl.gyp:openssl-cli',
           ],
           'conditions': [
+            [ 'OS not in "ios android"', {
+              'dependencies': [
+                # Not needed for iOS and Android, doesn't build
+                # For tests
+                './deps/openssl/openssl.gyp:openssl-cli',
+              ],
+            }],
             # -force_load or --whole-archive are not applicable for
             # the static library
             [ 'force_load=="true"', {
@@ -434,6 +443,11 @@
       'defines': [ 'HAVE_AMARO=1' ],
     }, {
       'defines': [ 'HAVE_AMARO=0' ]
+    }],
+    [ 'OS=="android" or OS=="ios"', {
+      'defines': [
+        'NODE_MOBILE',
+      ],
     }],
   ],
 }

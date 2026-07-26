@@ -298,7 +298,11 @@ class Heap final {
   // Don't apply pointer multiplier on Android since it has no swap space and
   // should instead adapt it's heap size based on available physical memory.
   static const int kPointerMultiplier = 1;
-  static const int kHeapLimitMultiplier = 1;
+  // nodejs-mobile: full Node.js workloads regularly need heaps >1 GB.
+  // Pointer compression is disabled in this fork (see common.gypi
+  // v8_enable_pointer_compression=0), so we are not bound by the 4 GB
+  // shared cage and can mirror the desktop 64-bit heap budget.
+  static const int kHeapLimitMultiplier = kSystemPointerSize / 4;
 #else
   static const int kPointerMultiplier = kTaggedSize / 4;
   // The heap limit needs to be computed based on the system pointer size
