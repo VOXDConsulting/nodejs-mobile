@@ -51,6 +51,30 @@ BUILD_ARCH() {
     echo "Could not find libnode.so file after compilation"
     exit 1
   fi
+
+  case "$TARGET_ARCH" in
+    arm) CXX_TARGET="arm-linux-androideabi" ;;
+    arm64) CXX_TARGET="aarch64-linux-android" ;;
+    x86) CXX_TARGET="i686-linux-android" ;;
+    x86_64) CXX_TARGET="x86_64-linux-android" ;;
+    *)
+      echo "Unsupported Android architecture for libc++_shared.so: $TARGET_ARCH"
+      exit 1
+      ;;
+  esac
+
+  NDK_PREBUILT_ROOT="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt"
+  NDK_PREBUILT_DIRS=("$NDK_PREBUILT_ROOT"/*)
+  if [ "${#NDK_PREBUILT_DIRS[@]}" -ne 1 ] || [ ! -d "${NDK_PREBUILT_DIRS[0]}" ]; then
+    echo "Expected exactly one NDK host toolchain under $NDK_PREBUILT_ROOT"
+    exit 1
+  fi
+  CXX_SHARED="${NDK_PREBUILT_DIRS[0]}/sysroot/usr/lib/$CXX_TARGET/libc++_shared.so"
+  if [ ! -f "$CXX_SHARED" ]; then
+    echo "Could not find the matching NDK libc++_shared.so at $CXX_SHARED"
+    exit 1
+  fi
+  cp "$CXX_SHARED" "out_android/$TARGET_ARCH_FOLDER/libc++_shared.so"
 }
 
 if [ $# -eq 2 ]; then
