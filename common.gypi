@@ -593,11 +593,11 @@
           }],
           ['_toolset=="host"', {
             'conditions': [
-              [ 'host_arch=="ia32"', {
+              [ 'host_arch=="ia32" or target_arch in "ia32 arm"', {
                 'cflags': [ '-m32' ],
                 'ldflags': [ '-m32' ],
               }],
-              [ 'host_arch=="x64"', {
+              [ 'host_arch=="x64" and target_arch in "x64 arm64"', {
                 'cflags': [ '-m64' ],
                 'ldflags': [ '-m64' ],
               }],
