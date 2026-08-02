@@ -6,7 +6,7 @@ on:
       source_ref:
         description: Exact source commit to build
         required: true
-        default: 59a0c9847ae02d3e4bee85fb13f8a382d6b8477e
+        default: 16293e887b55c9cfcb57946e3395ba2eb29d42d8
 
 permissions:
   contents: read
@@ -56,25 +56,29 @@ jobs:
             x86_64) abi="x86_64" ;;
             *) exit 1 ;;
           esac
-          lib="out_android/${abi}/libnode.so"
-          test -f "$lib"
-          readelf -lW "$lib" | awk '
-            BEGIN { load = 0; relro = 0; stack = 0 }
-            $1 == "LOAD" {
-              load = 1
-              if ($NF != "0x4000") exit 1
-            }
-            $1 == "GNU_RELRO" { relro = 1 }
-            $1 == "GNU_STACK" {
-              stack = 1
-              if ($(NF - 1) ~ /E/) exit 1
-            }
-            END { if (!load || !relro || !stack) exit 1 }
-          '
-          readelf -dW "$lib" | grep -Eq 'BIND_NOW|FLAGS_1.*NOW'
-          nm -D -C "$lib" | grep -Fq 'node::Start'
-          nm -D -C "$lib" | grep -Fq 'napi_get_cb_info'
-          nm -D -C "$lib" | grep -Fq 'WebAssembly'
+          node_lib="out_android/${abi}/libnode.so"
+          cxx_lib="out_android/${abi}/libc++_shared.so"
+          test -f "$node_lib"
+          test -f "$cxx_lib"
+          for lib in "$node_lib" "$cxx_lib"; do
+            readelf -lW "$lib" | awk '
+              BEGIN { load = 0; relro = 0; stack = 0 }
+              $1 == "LOAD" {
+                load = 1
+                if ($NF != "0x4000") exit 1
+              }
+              $1 == "GNU_RELRO" { relro = 1 }
+              $1 == "GNU_STACK" {
+                stack = 1
+                if ($(NF - 1) ~ /E/) exit 1
+              }
+              END { if (!load || !relro || !stack) exit 1 }
+            '
+          done
+          readelf -dW "$node_lib" | grep -Eq 'BIND_NOW|FLAGS_1.*NOW'
+          nm -D -C "$node_lib" | grep -Fq 'node::Start'
+          nm -D -C "$node_lib" | grep -Fq 'napi_get_cb_info'
+          nm -D -C "$node_lib" | grep -Fq 'WebAssembly'
 
       - name: Upload architecture output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -116,7 +120,9 @@ jobs:
             cd artifacts
             sha256sum \
               bin/arm64-v8a/libnode.so \
+              bin/arm64-v8a/libc++_shared.so \
               bin/x86_64/libnode.so \
+              bin/x86_64/libc++_shared.so \
               > SHA256SUMS
           )
 
