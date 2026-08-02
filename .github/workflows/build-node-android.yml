@@ -14,6 +14,11 @@ permissions:
 env:
   ANDROID_NDK_VERSION: 27.2.12479018
   ANDROID_TARGET_SDK_VERSION: 26
+  NODE_VERSION: 24.18.1
+  NODE_MODULE_VERSION: 137
+  NODE_SOURCE_REPOSITORY: VOXDConsulting/nodejs-mobile
+  NODE_SOURCE_COMMIT: ${{ inputs.source_ref }}
+  NODE_OFFICIAL_COMMIT: 9623d9ad85d37d2f0610ec4a82b48182cf2c6061
 
 jobs:
   build-android:
@@ -39,6 +44,13 @@ jobs:
           sudo apt-get install -y gcc-multilib g++-multilib
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Verify pinned Node source version
+        run: |
+          grep -Eq '^#define NODE_MAJOR_VERSION 24$' src/node_version.h
+          grep -Eq '^#define NODE_MINOR_VERSION 18$' src/node_version.h
+          grep -Eq '^#define NODE_PATCH_VERSION 1$' src/node_version.h
+          grep -Eq '^#define NODE_MODULE_VERSION 137$' src/node_version.h
 
       - name: Build Android runtime
         env:
@@ -116,6 +128,9 @@ jobs:
           cp -R out_android/arm64-v8a artifacts/bin/
           cp -R out_android/x86_64 artifacts/bin/
           cp -R out_android/libnode/include/* artifacts/include/
+          module_version=$(awk '$1 == "#define" && $2 == "NODE_MODULE_VERSION" { print $3; exit }' \
+            artifacts/include/node/node_version.h)
+          test "$module_version" = "$NODE_MODULE_VERSION"
           (
             cd artifacts
             sha256sum \
@@ -125,6 +140,25 @@ jobs:
               bin/x86_64/libc++_shared.so \
               > SHA256SUMS
           )
+          arm64_node_sha=$(sha256sum artifacts/bin/arm64-v8a/libnode.so | cut -d' ' -f1)
+          arm64_cxx_sha=$(sha256sum artifacts/bin/arm64-v8a/libc++_shared.so | cut -d' ' -f1)
+          x86_node_sha=$(sha256sum artifacts/bin/x86_64/libnode.so | cut -d' ' -f1)
+          x86_cxx_sha=$(sha256sum artifacts/bin/x86_64/libc++_shared.so | cut -d' ' -f1)
+          cat > artifacts/runtime.properties <<EOF
+          node.version=${NODE_VERSION}
+          node.module.version=${NODE_MODULE_VERSION}
+          feature.webassembly=true
+          source.repository=https://github.com/${NODE_SOURCE_REPOSITORY}
+          source.release=v${NODE_VERSION}
+          source.official.commit=${NODE_OFFICIAL_COMMIT}
+          source.commit=${NODE_SOURCE_COMMIT}
+          source.workflow.run=${GITHUB_RUN_ID}
+          source.artifact=nodejs-mobile-android-node24.18.1
+          lib.arm64-v8a.sha256=${arm64_node_sha}
+          libcxx.arm64-v8a.sha256=${arm64_cxx_sha}
+          lib.x86_64.sha256=${x86_node_sha}
+          libcxx.x86_64.sha256=${x86_cxx_sha}
+          EOF
 
       - name: Upload combined runtime
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
