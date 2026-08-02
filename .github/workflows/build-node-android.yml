@@ -7,9 +7,14 @@ on:
         description: Exact source commit to build
         required: true
         default: 16293e887b55c9cfcb57946e3395ba2eb29d42d8
+      artifact_run_id:
+        description: Existing successful architecture-artifact run to package without rebuilding
+        required: false
+        default: ""
 
 permissions:
   contents: read
+  actions: read
 
 env:
   ANDROID_NDK_VERSION: 27.2.12479018
@@ -19,10 +24,12 @@ env:
   NODE_SOURCE_REPOSITORY: VOXDConsulting/nodejs-mobile
   NODE_SOURCE_COMMIT: ${{ inputs.source_ref }}
   NODE_OFFICIAL_COMMIT: 9623d9ad85d37d2f0610ec4a82b48182cf2c6061
+  ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
 
 jobs:
   build-android:
     name: Build ${{ matrix.target_arch }}
+    if: ${{ inputs.artifact_run_id == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     strategy:
@@ -105,6 +112,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     needs: build-android
+    if: ${{ always() && (inputs.artifact_run_id != '' || needs['build-android'].result == 'success') }}
 
     steps:
       - name: Check out patched Node source
@@ -113,11 +121,23 @@ jobs:
           ref: ${{ inputs.source_ref }}
 
       - name: Download architecture outputs
+        if: ${{ inputs.artifact_run_id == '' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: node-android-*
           merge-multiple: true
           path: out_android
+
+      - name: Download architecture outputs from verified build
+        if: ${{ inputs.artifact_run_id != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: node-android-*
+          merge-multiple: true
+          path: out_android
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.artifact_run_id }}
 
       - name: Assemble distributable runtime
         run: |
@@ -128,7 +148,7 @@ jobs:
           cp -R out_android/arm64-v8a artifacts/bin/
           cp -R out_android/x86_64 artifacts/bin/
           cp -R out_android/libnode/include/* artifacts/include/
-          module_version=$(awk '$1 == "#define" && $2 == "NODE_MODULE_VERSION" { print $3; exit }' \
+          module_version=$(awk '$1 == "#define" && $2 == "NODE_MODULE_VERSION" && $3 ~ /^[0-9]+$/ { print $3; exit }' \
             artifacts/include/node/node_version.h)
           test "$module_version" = "$NODE_MODULE_VERSION"
           (
@@ -144,6 +164,7 @@ jobs:
           arm64_cxx_sha=$(sha256sum artifacts/bin/arm64-v8a/libc++_shared.so | cut -d' ' -f1)
           x86_node_sha=$(sha256sum artifacts/bin/x86_64/libnode.so | cut -d' ' -f1)
           x86_cxx_sha=$(sha256sum artifacts/bin/x86_64/libc++_shared.so | cut -d' ' -f1)
+          source_run_id="${ARTIFACT_RUN_ID:-$GITHUB_RUN_ID}"
           cat > artifacts/runtime.properties <<EOF
           node.version=${NODE_VERSION}
           node.module.version=${NODE_MODULE_VERSION}
@@ -152,7 +173,7 @@ jobs:
           source.release=v${NODE_VERSION}
           source.official.commit=${NODE_OFFICIAL_COMMIT}
           source.commit=${NODE_SOURCE_COMMIT}
-          source.workflow.run=${GITHUB_RUN_ID}
+          source.workflow.run=${source_run_id}
           source.artifact=nodejs-mobile-android-node24.18.1
           lib.arm64-v8a.sha256=${arm64_node_sha}
           libcxx.arm64-v8a.sha256=${arm64_cxx_sha}
