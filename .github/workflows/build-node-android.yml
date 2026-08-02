@@ -1,12 +1,12 @@
-name: Build CuidaMSG Node Android runtime
+name: Build CuidaMSG Node 24.18.1 Android runtime
 
 on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Source branch to build
+        description: Exact source commit to build
         required: true
-        default: codex/node24.18-android
+        default: 59a0c9847ae02d3e4bee85fb13f8a382d6b8477e
 
 permissions:
   contents: read
@@ -59,14 +59,21 @@ jobs:
           lib="out_android/${abi}/libnode.so"
           test -f "$lib"
           readelf -lW "$lib" | awk '
-            BEGIN { seen = 0 }
+            BEGIN { load = 0; relro = 0; stack = 0 }
             $1 == "LOAD" {
-              seen = 1
+              load = 1
               if ($NF != "0x4000") exit 1
             }
-            END { if (!seen) exit 1 }
+            $1 == "GNU_RELRO" { relro = 1 }
+            $1 == "GNU_STACK" {
+              stack = 1
+              if ($(NF - 1) ~ /E/) exit 1
+            }
+            END { if (!load || !relro || !stack) exit 1 }
           '
+          readelf -dW "$lib" | grep -Eq 'BIND_NOW|FLAGS_1.*NOW'
           nm -D -C "$lib" | grep -Fq 'node::Start'
+          nm -D -C "$lib" | grep -Fq 'napi_get_cb_info'
           nm -D -C "$lib" | grep -Fq 'WebAssembly'
 
       - name: Upload architecture output
@@ -74,7 +81,8 @@ jobs:
         with:
           name: node-android-${{ matrix.target_arch }}
           path: out_android
-          retention-days: 1
+          if-no-files-found: error
+          retention-days: 14
 
   combine-android:
     name: Combine Android runtime
@@ -115,6 +123,7 @@ jobs:
       - name: Upload combined runtime
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: nodejs-mobile-android-node24.18
+          name: nodejs-mobile-android-node24.18.1
           path: artifacts
-          retention-days: 1
+          if-no-files-found: error
+          retention-days: 14
